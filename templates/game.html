@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Uno Game{% endblock %}
+
+{% block extra_head %}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+{% endblock %}
+
+{% block content %}
+    <header>
+        <h1>UNO Game</h1>
+        <a href="/lobby" class="btn">Back to Lobby</a>
+    </header>
+    
+    <div id="game-status">Waiting for players...</div>
+    
+    <div id="player-info">
+        <!-- Player info will be populated by JavaScript -->
+    </div>
+    
+    <div id="game-board">
+        <div id="discard-pile"></div>
+        <button id="draw-card-btn" class="btn">Draw Card</button>
+    </div>
+    
+    <div id="player-hand"></div>
+    
+    <div id="color-selector">
+        <h3>Choose a color:</h3>
+        <div class="color-options">
+            <div class="color-option red" data-color="red"></div>
+            <div class="color-option blue" data-color="blue"></div>
+            <div class="color-option green" data-color="green"></div>
+            <div class="color-option yellow" data-color="yellow"></div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        const socket = io();
+        const gameId = window.location.pathname.split('/')[2];
+        const playerIndex = parseInt('{{ player_index }}');
+        
+        let currentGameState = {};
+        let selectedCardIndex = null;
+        
+        // Join the game room
+        socket.emit('join_game', { game_id: gameId });
+        
+        // Handle game updates
+        socket.on('game_started', (data) => {
+            currentGameState = data;
+            updateGameUI();
+        });
+        
+        socket.on('game_update', (data) => {
+            currentGameState = data;
+            updateGameUI();
+        });
+        
+        socket.on('game_over', (data) => {
+            alert(`${data.winner} has won the game!`);
+            window.location.href = '/lobby';
+        });
+        
+        socket.on('error', (data) => {
+            alert(data.message);
+        });
+        
+        // Draw card button
+        document.getElementById('draw-card-btn').addEventListener('click', () => {
+            socket.emit('draw_card', { 
+                game_id: gameId,
+                player_index: playerIndex
+            });
+        });
+        
+        // Color selector
+        document.querySelectorAll('.color-option').forEach(option => {
+            option.addEventListener('click', () => {
+                const color = option.getAttribute('data-color');
+                document.getElementById('color-selector').style.display = 'none';
+                
+                // Play the selected card with chosen color
+                socket.emit('play_card', {
+                    game_id: gameId,
+                    player_index: playerIndex,
+                    card_index: selectedCardIndex,
+                    chosen_color: color
+                });
+            });
+        });
+        
+        function updateGameUI() {
+            // Update game status
+            const statusElement = document.getElementById('game-status');
+            if (currentGameState.status === 'waiting') {
+                statusElement.textContent = 'Waiting for players...';
+            } else if (currentGameState.status === 'playing') {
+                statusElement.textContent = 'Game in progress';
+            } else if (currentGameState.status === 'finished') {
+                statusElement.textContent = 'Game finished';
+            }
+            
+            // Update player info
+            const playerInfoElement = document.getElementById('player-info');
+            playerInfoElement.innerHTML = '';
+            
+            for (let i = 0; i < currentGameState.player_count; i++) {
+                const playerElement = document.createElement('div');
+                playerElement.className = `player ${i === currentGameState.current_player ? 'current-player' : ''}`;
+                playerElement.innerHTML = `
+                    <h3>Player ${i + 1} ${i === playerIndex ? '(You)' : ''}</h3>
+                    <p>Cards: ${i === playerIndex ? currentGameState.your_hand.length : '?'}</p>
+                `;
+                playerInfoElement.appendChild(playerElement);
+            }
+            
+            // Update discard pile
+            const discardPileElement = document.getElementById('discard-pile');
+            if (currentGameState.top_card) {
+                discardPileElement.className = `card ${currentGameState.top_card.color}`;
+                discardPileElement.innerHTML = `<div class="value">${currentGameState.top_card.value}</div>`;
+            }
+            
+            // Update player hand
+            const playerHandElement = document.getElementById('player-hand');
+            playerHandElement.innerHTML = '';
+            
+            if (currentGameState.your_hand) {
+                currentGameState.your_hand.forEach((card, index) => {
+                    const cardElement = document.createElement('div');
+                    cardElement.className = `card ${card.color}`;
+                    cardElement.innerHTML = `<div class="value">${card.value}</div>`;
+                    
+                    // Only make cards clickable if it's your turn
+                    if (playerIndex === currentGameState.current_player) {
+                        cardElement.addEventListener('click', () => {
+                            if (card.color === 'wild') {
+                                selectedCardIndex = index;
+                                document.getElementById('color-selector').style.display = 'block';
+                            } else {
+                                socket.emit('play_card', {
+                                    game_id: gameId,
+                                    player_index: playerIndex,
+                                    card_index: index
+                                });
+                            }
+                        });
+                    }
+                    
+                    playerHandElement.appendChild(cardElement);
+                });
+            }
+        }
+    </script>
+{% endblock %}
