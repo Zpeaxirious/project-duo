@@ -1,13 +1,32 @@
-{% extends "base.html" %}
-
-{% block title %}Welcome{% endblock %}
-
-{% block content %}
-    <div style="text-align: center; margin-top: 5rem;">
-        <h1>Welcome to <span style="color: var(--primary-color)">UNO!</span></h1>
-        <div style="margin-top: 3rem;">
-            <a href="/login" class="btn">Login</a>
-            <a href="/register" class="btn">Register</a>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNO Online</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>UNO<span>Online</span></h1>
+            <div class="card-sample">
+                <div class="card red">7</div>
+                <div class="card blue">R</div>
+                <div class="card green">+2</div>
+                <div class="card yellow">W</div>
+            </div>
+        </div>
+        
+        <div class="auth-buttons">
+            <a href="{{ url_for('login') }}" class="btn btn-primary">Login</a>
+            <a href="{{ url_for('register') }}" class="btn btn-secondary">Register</a>
+        </div>
+        
+        <div class="game-info">
+            <p>Play UNO with friends online! Create or join a game and have fun!</p>
         </div>
     </div>
-{% endblock %}
+</body>
+</html>

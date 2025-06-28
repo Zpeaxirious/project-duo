@@ -1,90 +1,105 @@
-{% extends "base.html" %}
-
-{% block title %}Game Lobby{% endblock %}
-
-{% block extra_head %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lobby - UNO Online</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-{% endblock %}
-
-{% block content %}
-    <header>
-        <h1>Welcome to <span style="color: var(--primary-color)">UNO</span>, <span id="username">{{ username }}</span>!</h1>
-        <a href="/logout" class="btn btn-logout">Logout</a>
-    </header>
-    
-    <div class="game-section">
-        <div>
-            <h2>Create or Join a Game</h2>
-            <button id="create-game" class="btn">Create New Game</button>
-        </div>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>UNO<span>Online</span></h1>
+            <div class="user-info">
+                <span>Welcome, {{ username }}</span>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+            </div>
+        </header>
         
-        <div>
-            <h2>Available Games</h2>
-            <div id="game-list" class="game-list">
-                <div class="no-games">
-                    <p>No games available. Create one to get started!</p>
+        <div class="lobby-content">
+            <div class="game-controls">
+                <button id="create-game" class="btn btn-primary">Create New Game</button>
+                <div class="refresh-games">
+                    <button id="refresh-games" class="btn btn-secondary">⟳ Refresh</button>
+                </div>
+            </div>
+            
+            <div class="games-list">
+                <h2>Available Games</h2>
+                <div id="games-container">
+                    <p class="no-games">Loading games...</p>
                 </div>
             </div>
         </div>
     </div>
-{% endblock %}
-
-{% block scripts %}
+    
     <script>
         const socket = io();
-        const username = document.getElementById('username').textContent;
         
-        document.getElementById('create-game').addEventListener('click', () => {
-            socket.emit('create_game');
-        });
+        // Request games list on page load
+        socket.emit('get_games');
         
-        socket.on('game_created', (data) => {
-            window.location.href = `/game/${data.game_id}`;
-        });
-        
-        socket.on('games_list', (data) => {
-            const gameListElement = document.getElementById('game-list');
+        // Handle games list updates
+        socket.on('games_list', function(data) {
+            const container = document.getElementById('games-container');
             
             if (data.games.length === 0) {
-                gameListElement.innerHTML = `
-                    <div class="no-games">
-                        <p>No games available. Create one to get started!</p>
-                    </div>
-                `;
+                container.innerHTML = '<p class="no-games">No available games. Create one!</p>';
                 return;
             }
             
-            gameListElement.innerHTML = data.games.map(game => `
-                <div class="game-card">
-                    <h3>Game ${game.game_id.slice(0, 8)}</h3>
-                    <p>Players: ${game.player_count}/4</p>
-                    <div class="players">
-                        ${game.players.map(player => `
-                            <span class="player-tag">${player}</span>
-                        `).join('')}
+            container.innerHTML = '';
+            data.games.forEach(game => {
+                const gameElement = document.createElement('div');
+                gameElement.className = 'game-item';
+                gameElement.innerHTML = `
+                    <div class="game-info">
+                        <span class="game-id">Game ID: ${game.game_id.substring(0, 8)}</span>
+                        <span class="players">Players: ${game.player_count}/6</span>
                     </div>
-                    <button class="btn btn-small join-game" data-game-id="${game.game_id}">Join Game</button>
-                </div>
-            `).join('');
+                    <div class="game-players">
+                        ${game.players.map(player => `<span class="player-tag">${player}</span>`).join('')}
+                    </div>
+                    <button class="btn btn-primary join-game" data-game-id="${game.game_id}">Join</button>
+                `;
+                container.appendChild(gameElement);
+            });
             
             // Add event listeners to join buttons
             document.querySelectorAll('.join-game').forEach(button => {
-                button.addEventListener('click', () => {
-                    const gameId = button.getAttribute('data-game-id');
+                button.addEventListener('click', function() {
+                    const gameId = this.getAttribute('data-game-id');
                     socket.emit('join_game', { game_id: gameId });
                 });
             });
         });
         
-        socket.on('join_success', (data) => {
+        // Handle successful join
+        socket.on('join_success', function(data) {
             window.location.href = `/game/${data.game_id}`;
         });
         
-        socket.on('join_error', (data) => {
+        // Handle join errors
+        socket.on('join_error', function(data) {
             alert(data.message);
         });
         
-        // Request games list when page loads
-        socket.emit('get_games');
+        // Create game button
+        document.getElementById('create-game').addEventListener('click', function() {
+            socket.emit('create_game');
+        });
+        
+        // Refresh games button
+        document.getElementById('refresh-games').addEventListener('click', function() {
+            socket.emit('get_games');
+        });
+        
+        // Handle game created
+        socket.on('game_created', function(data) {
+            window.location.href = `/game/${data.game_id}`;
+        });
     </script>
-{% endblock %}
+</body>
+</html>

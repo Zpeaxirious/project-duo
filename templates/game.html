@@ -1,158 +1,210 @@
-{% extends "base.html" %}
-
-{% block title %}Uno Game{% endblock %}
-
-{% block extra_head %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNO Game - UNO Online</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-{% endblock %}
-
-{% block content %}
-    <header>
-        <h1>UNO Game</h1>
-        <a href="/lobby" class="btn">Back to Lobby</a>
-    </header>
-    
-    <div id="game-status">Waiting for players...</div>
-    
-    <div id="player-info">
-        <!-- Player info will be populated by JavaScript -->
-    </div>
-    
-    <div id="game-board">
-        <div id="discard-pile"></div>
-        <button id="draw-card-btn" class="btn">Draw Card</button>
-    </div>
-    
-    <div id="player-hand"></div>
-    
-    <div id="color-selector">
-        <h3>Choose a color:</h3>
-        <div class="color-options">
-            <div class="color-option red" data-color="red"></div>
-            <div class="color-option blue" data-color="blue"></div>
-            <div class="color-option green" data-color="green"></div>
-            <div class="color-option yellow" data-color="yellow"></div>
+</head>
+<body>
+    <div class="game-container">
+        <header>
+            <h1>UNO<span>Online</span></h1>
+            <div class="game-id">Game ID: {{ game_id }}</div>
+            <button id="leave-game" class="btn btn-secondary">Leave Game</button>
+        </header>
+        
+        <div class="game-board">
+            <div class="players-container" id="players-container">
+                <!-- Players will be populated by JavaScript -->
+            </div>
+            
+            <div class="play-area">
+                <div class="discard-pile" id="discard-pile">
+                    <!-- Top card will be shown here -->
+                </div>
+                <div class="draw-pile" id="draw-pile">
+                    <div class="card back"></div>
+                </div>
+            </div>
+            
+            <div class="current-player" id="current-player">
+                <!-- Current player indicator -->
+            </div>
+            
+            <div class="player-hand" id="player-hand">
+                <!-- Player's hand will be populated by JavaScript -->
+            </div>
+            
+            <div class="game-controls">
+                <button id="draw-card" class="btn btn-primary">Draw Card</button>
+                <button id="start-game" class="btn btn-primary" style="display: none;">Start Game</button>
+                <div class="color-selector" id="color-selector" style="display: none;">
+                    <p>Choose a color:</p>
+                    <div class="color-options">
+                        <button class="color-btn red" data-color="red"></button>
+                        <button class="color-btn blue" data-color="blue"></button>
+                        <button class="color-btn green" data-color="green"></button>
+                        <button class="color-btn yellow" data-color="yellow"></button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-{% endblock %}
-
-{% block scripts %}
+    
     <script>
         const socket = io();
-        const gameId = window.location.pathname.split('/')[2];
-        const playerIndex = parseInt('{{ player_index }}');
-        
-        let currentGameState = {};
-        let selectedCardIndex = null;
+        const gameId = '{{ game_id }}';
+        const playerIndex = {{ player_index }};
         
         // Join the game room
         socket.emit('join_game', { game_id: gameId });
         
+        // Request initial game state
+        socket.emit('get_game_state', { game_id: gameId });
+        
         // Handle game updates
-        socket.on('game_started', (data) => {
-            currentGameState = data;
-            updateGameUI();
-        });
-        
-        socket.on('game_update', (data) => {
-            currentGameState = data;
-            updateGameUI();
-        });
-        
-        socket.on('game_over', (data) => {
-            alert(`${data.winner} has won the game!`);
-            window.location.href = '/lobby';
-        });
-        
-        socket.on('error', (data) => {
-            alert(data.message);
-        });
-        
-        // Draw card button
-        document.getElementById('draw-card-btn').addEventListener('click', () => {
-            socket.emit('draw_card', { 
-                game_id: gameId,
-                player_index: playerIndex
-            });
-        });
-        
-        // Color selector
-        document.querySelectorAll('.color-option').forEach(option => {
-            option.addEventListener('click', () => {
-                const color = option.getAttribute('data-color');
-                document.getElementById('color-selector').style.display = 'none';
-                
-                // Play the selected card with chosen color
-                socket.emit('play_card', {
-                    game_id: gameId,
-                    player_index: playerIndex,
-                    card_index: selectedCardIndex,
-                    chosen_color: color
-                });
-            });
-        });
-        
-        function updateGameUI() {
-            // Update game status
-            const statusElement = document.getElementById('game-status');
-            if (currentGameState.status === 'waiting') {
-                statusElement.textContent = 'Waiting for players...';
-            } else if (currentGameState.status === 'playing') {
-                statusElement.textContent = 'Game in progress';
-            } else if (currentGameState.status === 'finished') {
-                statusElement.textContent = 'Game finished';
-            }
+        socket.on('game_update', function(data) {
+            // Update players list
+            const playersContainer = document.getElementById('players-container');
+            playersContainer.innerHTML = '';
             
-            // Update player info
-            const playerInfoElement = document.getElementById('player-info');
-            playerInfoElement.innerHTML = '';
-            
-            for (let i = 0; i < currentGameState.player_count; i++) {
+            data.players.forEach((player, index) => {
                 const playerElement = document.createElement('div');
-                playerElement.className = `player ${i === currentGameState.current_player ? 'current-player' : ''}`;
+                playerElement.className = `player ${index === data.your_index ? 'you' : ''} ${index === data.current_player ? 'current' : ''}`;
                 playerElement.innerHTML = `
-                    <h3>Player ${i + 1} ${i === playerIndex ? '(You)' : ''}</h3>
-                    <p>Cards: ${i === playerIndex ? currentGameState.your_hand.length : '?'}</p>
+                    <span class="player-name">${player.username}</span>
+                    <span class="card-count">${player.card_count} cards</span>
                 `;
-                playerInfoElement.appendChild(playerElement);
+                playersContainer.appendChild(playerElement);
+            });
+            
+            // Update discard pile (top card)
+            const discardPile = document.getElementById('discard-pile');
+            if (data.top_card) {
+                discardPile.innerHTML = '';
+                const card = createCardElement(data.top_card);
+                discardPile.appendChild(card);
             }
             
-            // Update discard pile
-            const discardPileElement = document.getElementById('discard-pile');
-            if (currentGameState.top_card) {
-                discardPileElement.className = `card ${currentGameState.top_card.color}`;
-                discardPileElement.innerHTML = `<div class="value">${currentGameState.top_card.value}</div>`;
-            }
+            // Update current player indicator
+            const currentPlayerElement = document.getElementById('current-player');
+            currentPlayerElement.textContent = `Current turn: ${data.players[data.current_player].username}`;
             
-            // Update player hand
-            const playerHandElement = document.getElementById('player-hand');
-            playerHandElement.innerHTML = '';
+            // Update player's hand
+            const playerHand = document.getElementById('player-hand');
+            playerHand.innerHTML = '';
             
-            if (currentGameState.your_hand) {
-                currentGameState.your_hand.forEach((card, index) => {
-                    const cardElement = document.createElement('div');
-                    cardElement.className = `card ${card.color}`;
-                    cardElement.innerHTML = `<div class="value">${card.value}</div>`;
+            if (data.your_hand) {
+                data.your_hand.forEach((card, index) => {
+                    const cardElement = createCardElement(card);
+                    cardElement.dataset.index = index;
                     
-                    // Only make cards clickable if it's your turn
-                    if (playerIndex === currentGameState.current_player) {
-                        cardElement.addEventListener('click', () => {
+                    // Only make cards clickable if it's the player's turn
+                    if (data.current_player === data.your_index && data.status === 'playing') {
+                        cardElement.classList.add('playable');
+                        cardElement.addEventListener('click', function() {
                             if (card.color === 'wild') {
-                                selectedCardIndex = index;
+                                // Show color selector for wild cards
                                 document.getElementById('color-selector').style.display = 'block';
+                                // Store the card index to play after color selection
+                                this.dataset.selected = 'true';
                             } else {
-                                socket.emit('play_card', {
-                                    game_id: gameId,
-                                    player_index: playerIndex,
-                                    card_index: index
-                                });
+                                playCard(index);
                             }
                         });
                     }
                     
-                    playerHandElement.appendChild(cardElement);
+                    playerHand.appendChild(cardElement);
                 });
             }
+            
+            // Show/hide start game button
+            const startGameBtn = document.getElementById('start-game');
+            startGameBtn.style.display = (data.status === 'waiting' && data.your_index === 0) ? 'block' : 'none';
+            
+            // Show/hide draw card button
+            const drawCardBtn = document.getElementById('draw-card');
+            drawCardBtn.style.display = (data.status === 'playing' && data.current_player === data.your_index) ? 'block' : 'none';
+        });
+        
+        // Handle game over
+        socket.on('game_over', function(data) {
+            alert(`Game over! ${data.winner} wins!`);
+        });
+        
+        // Handle player joined/left
+        socket.on('player_joined', function(data) {
+            // Game state will be updated by the next game_update
+        });
+        
+        socket.on('player_left', function(data) {
+            // Game state will be updated by the next game_update
+        });
+        
+        // Start game button
+        document.getElementById('start-game').addEventListener('click', function() {
+            socket.emit('start_game', { game_id: gameId });
+        });
+        
+        // Draw card button
+        document.getElementById('draw-card').addEventListener('click', function() {
+            socket.emit('draw_card', { 
+                game_id: gameId, 
+                player_index: playerIndex 
+            });
+        });
+        
+        // Leave game button
+        document.getElementById('leave-game').addEventListener('click', function() {
+            socket.emit('leave_game', { game_id: gameId });
+            window.location.href = '/lobby';
+        });
+        
+        // Color selection for wild cards
+        document.querySelectorAll('.color-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const color = this.dataset.color;
+                document.getElementById('color-selector').style.display = 'none';
+                
+                // Find the selected card
+                const selectedCard = document.querySelector('.card[data-selected="true"]');
+                if (selectedCard) {
+                    const cardIndex = selectedCard.dataset.index;
+                    playCard(cardIndex, color);
+                    selectedCard.removeAttribute('data-selected');
+                }
+            });
+        });
+        
+        // Helper function to create card element
+        function createCardElement(card) {
+            const cardElement = document.createElement('div');
+            cardElement.className = `card ${card.color}`;
+            
+            // Special card symbols
+            let value = card.value;
+            if (value === 'skip') value = '⊘';
+            if (value === 'reverse') value = '⇄';
+            if (value === 'draw2') value = '+2';
+            if (value === 'wild_draw4') value = '+4';
+            if (value === 'wild') value = 'W';
+            
+            cardElement.textContent = value;
+            return cardElement;
+        }
+        
+        // Helper function to play a card
+        function playCard(cardIndex, chosenColor = null) {
+            socket.emit('play_card', { 
+                game_id: gameId,
+                player_index: playerIndex,
+                card_index: cardIndex,
+                chosen_color: chosenColor
+            });
         }
     </script>
-{% endblock %}
+</body>
+</html>
