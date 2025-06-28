@@ -7,7 +7,7 @@ from uuid import uuid4
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Database setup
 def init_db():
@@ -154,6 +154,25 @@ class UnoGame:
         self.current_player = (self.current_player + self.direction) % len(self.players)
         return True
 
+    def remove_player(self, username):
+        """Remove a player from the game"""
+        self.players = [p for p in self.players if p['username'] != username]
+        
+        # If no players left, mark game for deletion
+        if not self.players:
+            self.status = 'empty'
+            return True
+        
+        # Adjust current player index if needed
+        if self.current_player >= len(self.players):
+            self.current_player = 0
+        
+        # If less than 2 players remain, end the game
+        if len(self.players) < 2 and self.status == 'playing':
+            self.status = 'finished'
+        
+        return False
+
 # User management routes
 @app.route('/')
 def index():
@@ -245,6 +264,27 @@ def handle_connect():
     if 'username' in session:
         emit('get_games')
 
+@socketio.on('disconnect')
+def handle_disconnect():
+    if 'username' in session:
+        # Remove player from any game they're in
+        username = session['username']
+        for game_id, game in list(active_games.items()):
+            if any(p['username'] == username for p in game.players):
+                leave_room(game_id)
+                if game.remove_player(username):
+                    # Game is empty, delete it
+                    del active_games[game_id]
+                else:
+                    # Update remaining players
+                    emit('player_left', {'username': username}, room=game_id)
+                    if game.status == 'playing':
+                        update_game_state(game_id)
+                break
+        
+        # Update lobby
+        handle_get_games()
+
 @socketio.on('get_games')
 def handle_get_games():
     """Send list of available games to the client"""
@@ -269,7 +309,7 @@ def handle_create_game():
     active_games[game_id] = game
     
     emit('game_created', {'game_id': game_id})
-    handle_get_games()
+    socketio.emit('games_list_update')
 
 @socketio.on('join_game')
 def handle_join_game(data):
@@ -289,8 +329,8 @@ def handle_join_game(data):
         emit('join_error', {'message': 'Already in this game'})
         return
     
-    # Check if game is full
-    if len(game.players) >= 4:
+    # Check if game is full (max 6 players)
+    if len(game.players) >= 6:
         emit('join_error', {'message': 'Game is full'})
         return
     
@@ -298,17 +338,49 @@ def handle_join_game(data):
     game.players.append({'username': session['username'], 'hand': []})
     join_room(game_id)
     
-    # Notify all players
+    # Notify all players in the game
     emit('player_joined', {
         'username': session['username'],
-        'player_count': len(game.players)
+        'player_count': len(game.players),
+        'players': [p['username'] for p in game.players]
     }, room=game_id)
     
-    # Update games list for everyone in lobby
-    handle_get_games()
+    # Update games list for everyone
+    socketio.emit('games_list_update')
     
     # Let the joining player know it was successful
     emit('join_success', {'game_id': game_id})
+
+@socketio.on('leave_game')
+def handle_leave_game(data):
+    if 'username' not in session:
+        return
+    
+    game_id = data.get('game_id')
+    if game_id not in active_games:
+        return
+    
+    game = active_games[game_id]
+    username = session['username']
+    
+    leave_room(game_id)
+    
+    if game.remove_player(username):
+        # Game is empty, delete it
+        del active_games[game_id]
+    else:
+        # Notify remaining players
+        emit('player_left', {
+            'username': username,
+            'player_count': len(game.players),
+            'players': [p['username'] for p in game.players]
+        }, room=game_id)
+        
+        if game.status == 'playing':
+            update_game_state(game_id)
+    
+    # Update games list
+    socketio.emit('games_list_update')
 
 @socketio.on('start_game')
 def handle_start_game(data):
@@ -322,24 +394,17 @@ def handle_start_game(data):
     if game.players[0]['username'] != session['username']:
         return
     
+    # Need at least 2 players
+    if len(game.players) < 2:
+        emit('error', {'message': 'Need at least 2 players to start'})
+        return
+    
     if game.start_game():
         # Send game state to all players
-        game_state = {
-            'current_player': game.current_player,
-            'direction': game.direction,
-            'top_card': game.discard_pile[-1],
-            'status': game.status,
-            'player_count': len(game.players)
-        }
+        update_game_state(game_id)
         
-        # Send each player their hand
-        for i, player in enumerate(game.players):
-            emit('game_started', {
-                **game_state,
-                'your_index': i,
-                'your_hand': player['hand'],
-                'cards_in_deck': len(game.deck)
-            }, room=game_id)
+        # Update games list (remove from available games)
+        socketio.emit('games_list_update')
 
 @socketio.on('play_card')
 def handle_play_card(data):
@@ -354,7 +419,7 @@ def handle_play_card(data):
     
     # Validate it's the player's turn
     if game.current_player != player_index:
-        emit('error', {'message': 'Not your turn'}, room=game_id)
+        emit('error', {'message': 'Not your turn'})
         return
     
     result = game.play_card(player_index, card_index, chosen_color)
@@ -362,10 +427,10 @@ def handle_play_card(data):
     if result == 'win':
         emit('game_over', {'winner': game.players[player_index]['username']}, room=game_id)
     elif result:
-        # Update all players
+        # Update all players instantly
         update_game_state(game_id)
     else:
-        emit('error', {'message': 'Invalid move'}, room=game_id)
+        emit('error', {'message': 'Invalid move'})
 
 @socketio.on('draw_card')
 def handle_draw_card(data):
@@ -378,22 +443,26 @@ def handle_draw_card(data):
     
     # Validate it's the player's turn
     if game.current_player != player_index:
-        emit('error', {'message': 'Not your turn'}, room=game_id)
+        emit('error', {'message': 'Not your turn'})
         return
     
     game.draw_card(player_index)
     update_game_state(game_id)
 
 def update_game_state(game_id):
+    if game_id not in active_games:
+        return
+        
     game = active_games[game_id]
     
     game_state = {
         'current_player': game.current_player,
         'direction': game.direction,
-        'top_card': game.discard_pile[-1],
+        'top_card': game.discard_pile[-1] if game.discard_pile else None,
         'status': game.status,
         'player_count': len(game.players),
-        'cards_in_deck': len(game.deck)
+        'cards_in_deck': len(game.deck),
+        'players': [{'username': p['username'], 'card_count': len(p['hand'])} for p in game.players]
     }
     
     # Send each player their updated hand and game state
